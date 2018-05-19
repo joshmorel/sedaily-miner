@@ -1,15 +1,33 @@
 require('dotenv').config()
 const monk = require('monk');
 const db = require('monk')(process.env.MONGO_DB);
-const rp = require('request-promise');
 const threads = db.get('forumthreads')
 const posts = db.get('posts')
-const Bluebird = require('bluebird');
+const users = db.get('users')
 const moment = require('moment');
 
+function createAuthorOrGetId(successCallback) {
+  const THREAD_AUTHOR = {
+    username: 'SoftwareDaily',
+    name: 'Software Daily',
+    bio: 'SED',
+    email: 'contact@softwaredaily.com',
+    website: 'https://www.softwaredaily.com'
+  };
+  const { username } = THREAD_AUTHOR;
+  users.findOne({ username }).then((user) => {
+    if (user) {
+      console.log(`Found user ${username}. Using id ${user._id}`);
+      return successCallback(user._id)
+    }
+    users.insert(THREAD_AUTHOR).then((newUser) => {
+      console.log(`Couldn't find ${username}, created with id ${newUser._id}`);
+      successCallback(newUser._id)
+    })
+  })
+}
 
-
-function createThreadForPodcastEpisode(post, successCallback) {
+function createThreadForPodcastEpisode(post, authorId, successCallback) {
   // Make sure thread doesn't exist already:
   threads.findOne({podcastEpisode: post._id}).then((thread) => {
     if (!thread) {
@@ -19,7 +37,7 @@ function createThreadForPodcastEpisode(post, successCallback) {
       threads.insert({
         title: 'Discuss: ' + post.title.rendered,
         content: ' ',
-        author: monk.id(process.env.THREAD_AUTHOR_ID),
+        author: authorId,
         podcastEpisode: monk.id(post._id),
         score: 0 ,
         // __v: 0,
@@ -55,18 +73,18 @@ posts.find( {thread: {$exists: true}})
 });
 */
 
-posts.find( {thread: {$exists: false}})
+createAuthorOrGetId((authorId) => {
+  posts.find( {thread: {$exists: false}})
   .each ((_post) => {
     (function(post){
-      createThreadForPodcastEpisode(post, (thread) => {
+      createThreadForPodcastEpisode(post, authorId, (thread) => {
         posts.update({_id: post._id}, {$set: {
-          thread: monk.id(thread._id),
-        }}).then((updatedPost) => {
-
+            thread: monk.id(thread._id),
+          }}).then((updatedPost) => {
         }).catch((e) => {
           console.log('error setting thread', post, thread);
         })
       });
     })(_post)
-
   });
+})
